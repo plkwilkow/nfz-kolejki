@@ -1,0 +1,52 @@
+name: Zbieranie danych NFZ
+
+on:
+  schedule:
+    # Codziennie o 05:17 UTC = 07:17 czasu letniego / 06:17 zimowego w Polsce.
+    # Po ok. 6 tygodniach wystarczy dwa razy w tygodniu (pon. i czw.): "17 5 * * 1,4"
+    - cron: "17 5 * * *"
+  workflow_dispatch: # przycisk "Run workflow" do ręcznego uruchomienia
+
+permissions:
+  contents: write # pozwala zapisać pobrane dane w repozytorium
+
+concurrency:
+  group: nfz-collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Pobierz repozytorium
+        uses: actions/checkout@v6
+
+      - name: Zainstaluj R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Zainstaluj pakiety R
+        run: Rscript -e 'install.packages(c("httr2", "jsonlite"))'
+
+      - name: Pobierz dane z API NFZ
+        run: Rscript R/collect_nfz.R
+
+      - name: Zapisz dane w repozytorium
+        if: always() # zapisuje także dane z przebiegu, który skończył się błędem
+        run: |
+          if [ ! -d data ]; then
+            echo "Brak folderu data - nic do zapisania."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "Brak nowych plików do zapisania."
+            exit 0
+          fi
+          git commit -m "Dane NFZ $(TZ=Europe/Warsaw date '+%Y-%m-%d %H:%M')"
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
