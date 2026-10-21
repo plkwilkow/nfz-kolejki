@@ -1,0 +1,2 @@
+"started_at_utc","finished_at_utc","duration_min","api_base","api_version","n_queries_planned","n_queries","n_incomplete_queries","n_failed_queries","n_requests","n_failed_requests","sum_expected","coverage","n_records","snapshot_file","raw_file","status","aborted","error","new_attribute_keys"
+"2026-10-21T15:29:10Z","2026-10-21T15:41:57Z",12.8,"https://apinfz.nfz.gov.pl/app-itl-api-pcus","1.4",192,192,0,0,481,0,8976,1,8536,"data/raw/2026/10/snapshot_2026-10-21_1729.csv.gz","data/raw/2026/10/raw_2026-10-21_1729.jsonl.gz","complete",FALSE,,""
