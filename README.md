@@ -22,9 +22,14 @@ Opis stanu systemu NFZ: październik 2026.
 | `statistics.provider-data.average-period` | średni czas oczekiwania w dniach, raportowany przez placówkę | raz w miesiącu |
 | `statistics.provider-data.update` | miesiąc, którego dotyczą statystyki (np. `2026-09`) | raz w miesiącu |
 | `dates.pcus` | **PCUŚ**: prognozowany czas oczekiwania, liczony przez NFZ (np. `12 dni`, `2 mies. 1 tydz.`) | poza Centralną e-Rejestracją: raz w miesiącu |
-| `dates.date-situation-as-at` | data stanu informacji, różna dla kolejek | niejasne; sprawdzisz to w danych |
+| `dates.date-situation-as-at` | data ostatniej informacji od placówki, różna dla kolejek | codziennie w ok. 6% kolejek, zwykle bez zmiany innych pól |
 | `queue-in-cer` | czy kolejka jest w Centralnej e-Rejestracji (CeR) | przy zmianach systemowych |
 | adres, telefon, dostępność | dane placówki | rzadko |
+| `id` (w snapshotach `queue_id`) | identyfikator rekordu | **codziennie od nowa**, nie nadaje się do łączenia dni (zob. „Klucz kolejki”) |
+
+Pomiar z 5 snapshotów (21–25.10.2026): z dnia na dzień statystyki miesięczne zmieniały się
+w 2–18 kolejkach (spóźnione raporty za wrzesień), PCUŚ w 1–5, zawsze razem z nowymi
+statystykami danej kolejki. Duża zmiana przyjdzie z raportami za październik, po 10 listopada.
 
 Od 1 lipca 2026 r. NFZ nie publikuje już „pierwszego wolnego terminu”; zastąpił go PCUŚ.
 Dla świadczeń spoza CeR PCUŚ jest liczony raz w miesiącu ze średnich czasów oczekiwania
@@ -97,8 +102,9 @@ Jeśli test zakończy się błędem, skopiuj komunikat z konsoli.
 
 ## Krok 4. Codzienna praca systemu
 
-- Przebieg uruchamia się codziennie o 07:17 czasu letniego (06:17 zimowego). Harmonogram GitHuba
-  bywa opóźniony o kilkanaście minut i jest to normalne.
+- Przebieg jest zaplanowany codziennie na 07:17 czasu letniego (06:17 zimowego). Harmonogram
+  GitHuba nie jest punktualny: w październiku 2026 przebiegi ruszały 4–5 godzin po czasie.
+  Przy danych zmieniających się raz w miesiącu to bez znaczenia.
 - Gdy przebieg się nie uda albo pobierze wyraźnie mniej danych niż powinien, GitHub wyśle Ci
   e-mail. Pobrane dane zostają zapisane także wtedy.
 - **Po ok. 6 tygodniach** uruchom u siebie `R/build_panel.R` (opis niżej). Pokaże, w które dni
@@ -123,12 +129,19 @@ data/
   panel/                              tabele do analiz (tworzy R/build_panel.R)
 ```
 
-Najważniejsze kolumny snapshotu: `queue_id`, `case` (1 = stabilny, 2 = pilny), `benefit`,
+Najważniejsze kolumny snapshotu: `case` (1 = stabilny, 2 = pilny), `benefit`,
 `provider`, `provider_code`, `place`, `locality`, `teryt_place`, `queue_in_cer`,
 `stat_awaiting`, `stat_removed`, `stat_average_period`, `stat_update`, `dates_pcus`,
 `dates_situation_as_at`, `matched_keywords`. Kolumny `*_extra_json` zbierają pola, których
 skrypt jeszcze nie zna. Jeśli NFZ coś doda, nic nie zginie, a w `runs.csv` pojawi się nazwa
 nowego pola.
+
+**Klucz kolejki.** `queue_id` zmienia się codziennie (w snapshotach z 21–25.10.2026 żaden się
+nie powtórzył), więc do łączenia dni służy klucz złożony z pięciu kolumn: `provider_code`,
+`id_resort_part_vii`, `id_resort_part_viii`, `benefit`, `case`. W tych snapshotach był unikalny
+każdego dnia. Skrypty w `R/dane_lokalne.R` dodają go jako kolumnę `klucz`. Klucz zmienia się,
+gdy placówka dostanie nowy kod resortowy komórki (raz w tych 5 dniach: poradnia we Wrocławiu),
+wtedy ta sama kolejka wygląda jak zamknięta i nowa.
 
 ```r
 x <- read.csv("data/raw/2026/10/snapshot_2026-10-16_0717.csv.gz",
@@ -144,6 +157,27 @@ Rzetelność bazy zależy właśnie od tego, a nie od częstotliwości pobierani
 
 ---
 
+## Analiza na własnym komputerze
+
+```r
+source("R/analiza_kolejek.R")
+```
+
+Skrypt sam pobiera z GitHuba snapshoty, których nie masz jeszcze w folderze `data/`
+(funkcja `pobierz_z_github()` z `R/dane_lokalne.R`), a potem:
+
+1. podsumowuje najnowszy snapshot: aktywność kolejek, rozkład czasu oczekiwania, województwa,
+   świadczenia;
+2. pokazuje, ile kolejek zmieniło każde pole między kolejnymi snapshotami;
+3. oznacza kolejki do sprawdzenia czterema flagami: czas skrajnie dłuższy niż w kolejkach
+   z tym samym świadczeniem i trybem, skrajnie dużo oczekujących, niespójność liczby
+   oczekujących, skreśleń i średniego czasu (prawo Little'a), tryb pilny tak długi jak stabilny.
+
+Tabele trafiają do folderu `wyniki/` i otwierają się poprawnie w Excelu. Pojedynczą kolejkę
+obejrzysz funkcją `sprawdz()`, np. `sprawdz("WEJHEROWO", "ALKOHOL")`.
+
+---
+
 ## Panel do analiz
 
 ```r
@@ -153,16 +187,18 @@ source("R/build_panel.R")
 Tworzy dwie tabele w `data/panel/`:
 
 - **`stat_monthly.csv.gz`**: jeden wiersz to kolejka × tryb × miesiąc statystyk. Wartości pochodzą
-  z najnowszego snapshotu, w którym występuje dany miesiąc. `n_versions > 1` oznacza, że NFZ
-  zmieniał te wartości w trakcie miesiąca. Są też kolumny `teryt_powiat` i `teryt_woj` do
-  agregacji po powiatach.
-- **`pcus_changes.csv.gz`**: historia PCUŚ, czyli jeden wiersz na okres, w którym PCUŚ, data stanu
-  i flaga CeR się nie zmieniały. PCUŚ powyżej ok. miesiąca jest podawany z dokładnością do tygodni,
-  więc `pcus_days_approx` to przybliżenie, a `pcus_coarse = TRUE` oznacza wartość zaokrągloną
+  z najnowszego snapshotu, w którym występuje dany miesiąc. `liczba_wersji > 1` oznacza, że
+  wartości za ten miesiąc zmieniały się między snapshotami. Są też kolumny `wojewodztwo`
+  i `teryt_powiat` do agregacji.
+- **`pcus_changes.csv.gz`**: historia PCUŚ, czyli jeden wiersz na okres, w którym PCUŚ, jego
+  dostępność i flaga CeR się nie zmieniały (data stanu ma swój zakres w kolumnach `data_stanu_od`
+  i `data_stanu_do`). PCUŚ powyżej ok. miesiąca jest podawany z dokładnością do tygodni, więc
+  `pcus_dni_przybl` to przybliżenie, a `pcus_zaokraglony = TRUE` oznacza wartość zaokrągloną
   (w praktyce są to dane przedziałowe).
 
-Skrypt wypisuje też, w które dni pojawiły się nowe statystyki miesięczne i zmienił się PCUŚ,
-czyli empiryczną odpowiedź na pytanie, jak często NFZ aktualizuje dane.
+Kolejki są łączone po kluczu kolejki, nie po `queue_id`. Skrypt wypisuje też, w które dni
+pojawiły się nowe statystyki miesięczne i zmienił się PCUŚ, czyli empiryczną odpowiedź na
+pytanie, jak często NFZ aktualizuje dane.
 
 ---
 
